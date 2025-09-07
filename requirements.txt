@@ -1,0 +1,3 @@
+eventregistry
+requests
+requests_oauthlib
