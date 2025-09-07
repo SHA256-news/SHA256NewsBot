@@ -20,8 +20,14 @@ def fetch_news(client: EventRegistry) -> List[dict]:
     return list(query.execQuery(client, sortBy="date", maxItems=50))
 
 
-def tweet_articles(session: requests.Session, articles: List[dict], posted: Set[str], dry_run: bool) -> None:
-    """Post new articles to X."""
+def tweet_articles(
+    session: requests.Session,
+    articles: List[dict],
+    posted: Set[str],
+    dry_run: bool,
+    posted_file: str,
+) -> None:
+    """Post new articles to X and record URLs."""
     api_url = "https://api.twitter.com/2/tweets"
     for article in articles:
         url = article.get("url")
@@ -34,6 +40,9 @@ def tweet_articles(session: requests.Session, articles: List[dict], posted: Set[
             response = session.post(api_url, json={"text": text})
             response.raise_for_status()
         posted.add(url)
+        if posted_file:
+            with open(posted_file, "a") as fh:
+                fh.write(url + "\n")
 
 
 def main():
@@ -41,9 +50,10 @@ def main():
     parser.add_argument('--interval', type=int, default=900, help='Seconds between fetches.')
     parser.add_argument('--once', action='store_true', help='Fetch and post once then exit.')
     parser.add_argument('--dry-run', action='store_true', help='Print tweets instead of posting.')
+    parser.add_argument('--posted-file', default='posted_urls.txt', help='File tracking tweeted article URLs.')
     args = parser.parse_args()
 
-    newsapi_key = os.environ["NEWSAPI_KEY"]
+    newsapi_key = os.environ.get("NEWSAPI_KEY")
     news_client = EventRegistry(apiKey=newsapi_key)
 
     session = None
@@ -56,10 +66,17 @@ def main():
         session.auth = OAuth1(api_key, api_secret, access_token, access_secret)
 
     posted: Set[str] = set()
+    if args.posted_file and os.path.exists(args.posted_file):
+        with open(args.posted_file) as fh:
+            posted = {line.strip() for line in fh if line.strip()}
 
     while True:
-        articles = fetch_news(news_client)
-        tweet_articles(session, articles, posted, args.dry_run)
+        try:
+            articles = fetch_news(news_client)
+        except Exception as exc:
+            print(f"Error fetching news: {exc}")
+            articles = []
+        tweet_articles(session, articles, posted, args.dry_run, args.posted_file)
         if args.once:
             break
         time.sleep(args.interval)
